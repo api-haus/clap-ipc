@@ -1,0 +1,6 @@
+[submodule "third_party/music-router"]
+	path = third_party/music-router
+	url = https://github.com/api-haus/music-router
+[submodule "third_party/clap"]
+	path = third_party/clap
+	url = https://github.com/free-audio/clap
