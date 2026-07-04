@@ -1,7 +1,5 @@
-# release-please cuts releases from conventional commits on main; when a release is
-# created it builds the clap-ipc host for Linux/Windows/macOS and attaches the archives.
-# The Unity CLAP Router in-editor downloader fetches them from
-# releases/latest/download/clap-ipc-<platform>.{tar.gz,zip}. Public repo + GITHUB_TOKEN only.
+# release-please cuts a release from conventional commits on main; on release it builds
+# the clap-ipc host for Linux/Windows/macOS and attaches clap-ipc-<platform>.{tar.gz,zip}.
 name: release
 
 on:
