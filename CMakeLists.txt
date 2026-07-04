@@ -58,5 +58,5 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if(WIN32)
-  target_link_libraries(clap_ipc PRIVATE ws2_32)
+  target_link_libraries(clap_ipc PRIVATE ws2_32 avrt)
 endif()
