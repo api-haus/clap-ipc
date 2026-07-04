@@ -12,7 +12,9 @@
 #include <thread>
 #include <utility>
 
+#if !defined(_WIN32)
 #include <pthread.h>
+#endif
 
 #include <portaudio.h>
 
@@ -232,7 +234,11 @@ private:
         if (!self->elevated_)
         {
             set_thread_role(ThreadRole::Audio);
+#if defined(_WIN32)
+            self->rt_->elevate(std::thread::native_handle_type{});
+#else
             self->rt_->elevate(static_cast<std::thread::native_handle_type>(pthread_self()));
+#endif
             self->elevated_ = true;
         }
         auto** out = static_cast<float**>(output);

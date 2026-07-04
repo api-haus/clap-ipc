@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "config.h"
+#include "net_compat.h"
 
 namespace mr
 {
@@ -22,11 +23,12 @@ public:
     bool serve();
 
 private:
-    bool dispatch(int client_fd, const std::vector<std::uint8_t>& payload);
-    void handle_hello(int client_fd, std::uint32_t request_id, const std::uint8_t* body, std::size_t len);
-    void handle_get_params(int client_fd, std::uint32_t request_id, const std::uint8_t* body,
+    bool dispatch(socket_t client_fd, const std::vector<std::uint8_t>& payload);
+    void handle_hello(socket_t client_fd, std::uint32_t request_id, const std::uint8_t* body,
+                      std::size_t len);
+    void handle_get_params(socket_t client_fd, std::uint32_t request_id, const std::uint8_t* body,
                            std::size_t len);
-    void reply(int client_fd, std::uint16_t type, std::uint32_t request_id, const void* body,
+    void reply(socket_t client_fd, std::uint16_t type, std::uint32_t request_id, const void* body,
                std::size_t body_len);
 
     AudioGraph& graph_;

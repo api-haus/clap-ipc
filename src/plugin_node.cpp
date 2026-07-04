@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cstdio>
 
-#include <dlfcn.h>
+#include "dl_compat.h"
 
 #include <clap/ext/audio-ports.h>
 #include <clap/ext/note-ports.h>
@@ -60,22 +60,22 @@ std::unique_ptr<PluginNode> PluginNode::create(const char* path, std::uint32_t p
 {
     MR_ASSERT_CONTROL_THREAD();
 
-    void* dso = ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    void* dso = dl_open(path);
     if (dso == nullptr)
     {
-        std::fprintf(stderr, "[clap-ipc] dlopen failed: %s\n", ::dlerror());
+        std::fprintf(stderr, "[clap-ipc] dlopen failed: %s\n", dl_last_error());
         return nullptr;
     }
 
-    auto* entry = static_cast<const clap_plugin_entry_t*>(::dlsym(dso, "clap_entry"));
+    auto* entry = static_cast<const clap_plugin_entry_t*>(dl_symbol(dso, "clap_entry"));
     if (entry == nullptr || !clap_version_is_compatible(entry->clap_version))
     {
-        ::dlclose(dso);
+        dl_close(dso);
         return nullptr;
     }
     if (!entry->init(path))
     {
-        ::dlclose(dso);
+        dl_close(dso);
         return nullptr;
     }
 
@@ -140,7 +140,7 @@ PluginNode::~PluginNode()
     }
     if (dso_ != nullptr)
     {
-        ::dlclose(dso_);
+        dl_close(dso_);
     }
 }
 
