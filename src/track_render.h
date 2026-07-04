@@ -34,7 +34,7 @@ private:
     ParamEchoRing* echo_;
     std::uint32_t max_block_;
     bool drop_realtime_;
-    std::uint32_t last_time_ = 0;
+    EventReorderQueue reorder_;
     std::uint64_t last_stream_frame_ = 0;
     std::uint32_t last_latency_frames_ = 0;
     bool stream_started_ = false;

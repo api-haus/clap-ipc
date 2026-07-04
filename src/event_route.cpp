@@ -1,6 +1,6 @@
 #include "event_route.h"
 
-#include <cassert>
+#include <utility>
 
 #include <clap/ext/note-ports.h>
 
@@ -173,9 +173,76 @@ const clap_output_events_t* null_output_events()
     return &g_null_output;
 }
 
-void drain_and_demux(SpscRing& ring, const GraphState& g, NodeBucket* buckets,
-                     std::uint32_t block_start, std::uint32_t frames, bool drop_realtime,
-                     std::uint32_t& last_time)
+EventReorderQueue::EventReorderQueue(std::uint32_t capacity) : heap_(capacity), cap_(capacity) {}
+
+bool EventReorderQueue::less(const Slot& a, const Slot& b) noexcept
+{
+    if (a.ev.sample_time != b.ev.sample_time)
+    {
+        return a.ev.sample_time < b.ev.sample_time;
+    }
+    return a.seq < b.seq;
+}
+
+bool EventReorderQueue::push(const MrEvent& ev) noexcept
+{
+    if (size_ == cap_)
+    {
+        return false;
+    }
+    std::uint32_t i = size_++;
+    heap_[i] = Slot{ev, next_seq_++};
+    while (i > 0u)
+    {
+        std::uint32_t parent = (i - 1u) / 2u;
+        if (!less(heap_[i], heap_[parent]))
+        {
+            break;
+        }
+        std::swap(heap_[i], heap_[parent]);
+        i = parent;
+    }
+    return true;
+}
+
+const MrEvent* EventReorderQueue::peek_min() const noexcept
+{
+    return size_ == 0u ? nullptr : &heap_[0].ev;
+}
+
+void EventReorderQueue::pop_min() noexcept
+{
+    if (size_ == 0u)
+    {
+        return;
+    }
+    heap_[0] = heap_[--size_];
+    std::uint32_t i = 0u;
+    while (true)
+    {
+        std::uint32_t left = 2u * i + 1u;
+        std::uint32_t right = 2u * i + 2u;
+        std::uint32_t smallest = i;
+        if (left < size_ && less(heap_[left], heap_[smallest]))
+        {
+            smallest = left;
+        }
+        if (right < size_ && less(heap_[right], heap_[smallest]))
+        {
+            smallest = right;
+        }
+        if (smallest == i)
+        {
+            break;
+        }
+        std::swap(heap_[i], heap_[smallest]);
+        i = smallest;
+    }
+}
+
+void drain_and_demux(SpscRing& ring, EventReorderQueue& reorder, const GraphState& g,
+                     NodeBucket* buckets, std::uint32_t block_start, std::uint32_t frames,
+                     bool drop_realtime)
 {
     MR_ASSERT_AUDIO_THREAD();
 
@@ -187,15 +254,22 @@ void drain_and_demux(SpscRing& ring, const GraphState& g, NodeBucket* buckets,
         buckets[i].count = 0;
     }
 
-    const std::uint64_t block_end = static_cast<std::uint64_t>(block_start) + frames;
     while (const MrEvent* ev = ring.peek())
+    {
+        if (!reorder.push(*ev))
+        {
+            break;
+        }
+        ring.pop();
+    }
+
+    const std::uint64_t block_end = static_cast<std::uint64_t>(block_start) + frames;
+    while (const MrEvent* ev = reorder.peek_min())
     {
         if (static_cast<std::uint64_t>(ev->sample_time) >= block_end)
         {
             break;
         }
-        assert(ev->sample_time >= last_time && "producer must push nondecreasing global sample_time");
-        last_time = ev->sample_time;
 
         if (!drop_realtime)
         {
@@ -218,7 +292,7 @@ void drain_and_demux(SpscRing& ring, const GraphState& g, NodeBucket* buckets,
                 }
             }
         }
-        ring.pop();
+        reorder.pop_min();
     }
 }
 

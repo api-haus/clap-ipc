@@ -67,6 +67,7 @@ clap_output_events_t make_echo_sink(EchoContext* ctx)
 Renderer::Renderer(AudioGraph& graph, SpscRing ring, std::uint32_t max_block, bool drop_realtime,
                    ParamEchoRing* echo)
     : graph_{graph}, ring_{ring}, echo_{echo}, max_block_{max_block}, drop_realtime_{drop_realtime},
+      reorder_(ring.capacity()),
       buf_a_storage_(static_cast<std::size_t>(kMaxChannels) * max_block, 0.0f),
       buf_b_storage_(static_cast<std::size_t>(kMaxChannels) * max_block, 0.0f),
       buckets_(kMaxNodes)
@@ -93,7 +94,7 @@ void Renderer::render(float* const* out, std::uint32_t channels, std::uint32_t f
 
     if (!stream_started_ || clock.stream_frame < last_stream_frame_)
     {
-        last_time_ = 0;
+        reorder_.clear();
     }
     last_stream_frame_ = clock.stream_frame;
     stream_started_ = true;
@@ -104,7 +105,7 @@ void Renderer::render(float* const* out, std::uint32_t channels, std::uint32_t f
         std::memset(out[ch], 0, frames * sizeof(float));
     }
 
-    drain_and_demux(ring_, *g, buckets_.data(), block_start, frames, drop_realtime_, last_time_);
+    drain_and_demux(ring_, reorder_, *g, buckets_.data(), block_start, frames, drop_realtime_);
 
     for (std::uint32_t t = 0; t < g->track_count; ++t)
     {

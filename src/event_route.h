@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include <clap/events.h>
 #include <music_router/ring.h>
@@ -12,6 +13,32 @@ namespace mr
 {
 
 class PluginNode;
+
+class EventReorderQueue
+{
+public:
+    explicit EventReorderQueue(std::uint32_t capacity);
+
+    bool push(const MrEvent& ev) noexcept;
+    const MrEvent* peek_min() const noexcept;
+    void pop_min() noexcept;
+    void clear() noexcept { size_ = 0; }
+    bool empty() const noexcept { return size_ == 0; }
+
+private:
+    struct Slot
+    {
+        MrEvent ev;
+        std::uint64_t seq;
+    };
+
+    static bool less(const Slot& a, const Slot& b) noexcept;
+
+    std::vector<Slot> heap_;
+    std::uint32_t cap_;
+    std::uint32_t size_ = 0;
+    std::uint64_t next_seq_ = 0;
+};
 
 union ClapEventAny
 {
@@ -33,8 +60,8 @@ struct NodeBucket
 clap_input_events_t make_input_events(NodeBucket* bucket);
 const clap_output_events_t* null_output_events();
 
-void drain_and_demux(SpscRing& ring, const GraphState& g, NodeBucket* buckets,
-                     std::uint32_t block_start, std::uint32_t frames, bool drop_realtime,
-                     std::uint32_t& last_time);
+void drain_and_demux(SpscRing& ring, EventReorderQueue& reorder, const GraphState& g,
+                     NodeBucket* buckets, std::uint32_t block_start, std::uint32_t frames,
+                     bool drop_realtime);
 
 }
