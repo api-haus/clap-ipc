@@ -1,0 +1,98 @@
+# release-please cuts releases from conventional commits on main; when a release is
+# created it builds the clap-ipc host for Linux/Windows/macOS and attaches the archives.
+# The Unity CLAP Router in-editor downloader fetches them from
+# releases/latest/download/clap-ipc-<platform>.{tar.gz,zip}. Public repo + GITHUB_TOKEN only.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          token: ${{ github.token }}
+
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: linux-x86_64, archive: clap-ipc-linux-x86_64.tar.gz }
+          - { os: macos-latest, platform: macos, archive: clap-ipc-macos.tar.gz }
+          - { os: windows-latest, platform: win-x86_64, archive: clap-ipc-win-x86_64.zip }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config portaudio19-dev
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja pkg-config portaudio
+
+      - name: MSVC dev environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install ninja pkgconfiglite -y --no-progress
+          vcpkg install portaudio:x64-windows
+          echo "PKG_CONFIG_PATH=$VCPKG_INSTALLATION_ROOT/installed/x64-windows/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          extra=""
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            extra="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release $extra
+
+      - name: Build
+        run: cmake --build build --target clap_ipc --config Release
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist stage
+          name="clap-ipc"
+          [ "${{ runner.os }}" = "Windows" ] && name="clap-ipc.exe"
+          bin="$(find build -type f -name "$name" | head -1)"
+          if [ -z "$bin" ]; then echo "clap-ipc binary not found under build/"; find build -type f -name 'clap-ipc*'; exit 1; fi
+          cp "$bin" stage/
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            (cd stage && 7z a -tzip "../dist/${{ matrix.archive }}" ./*)
+          else
+            tar czf "dist/${{ matrix.archive }}" -C stage .
+          fi
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" "dist/${{ matrix.archive }}" --clobber
