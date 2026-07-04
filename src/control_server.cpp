@@ -6,9 +6,7 @@
 #include <string>
 #include <utility>
 
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
+#include "net_compat.h"
 
 #include <music_router/control.h>
 #include <music_router/params.h>
@@ -38,13 +36,13 @@ constexpr std::uint32_t ST_ERR_VERSION = 3;
 
 constexpr std::uint32_t kMaxFrame = 1u << 20;
 
-bool read_exact(int fd, void* buf, std::size_t n)
+bool read_exact(socket_t fd, void* buf, std::size_t n)
 {
     auto* p = static_cast<std::uint8_t*>(buf);
     std::size_t got = 0;
     while (got < n)
     {
-        ssize_t r = ::read(fd, p + got, n - got);
+        std::ptrdiff_t r = socket_recv(fd, p + got, n - got);
         if (r <= 0)
         {
             return false;
@@ -54,13 +52,13 @@ bool read_exact(int fd, void* buf, std::size_t n)
     return true;
 }
 
-bool write_all(int fd, const void* buf, std::size_t n)
+bool write_all(socket_t fd, const void* buf, std::size_t n)
 {
     auto* p = static_cast<const std::uint8_t*>(buf);
     std::size_t sent = 0;
     while (sent < n)
     {
-        ssize_t r = ::write(fd, p + sent, n - sent);
+        std::ptrdiff_t r = socket_send(fd, p + sent, n - sent);
         if (r <= 0)
         {
             return false;
@@ -94,7 +92,7 @@ ControlServer::ControlServer(AudioGraph& graph, HostSegment& segment, ICaptureBa
 {
 }
 
-void ControlServer::reply(int client_fd, std::uint16_t type, std::uint32_t request_id,
+void ControlServer::reply(socket_t client_fd, std::uint16_t type, std::uint32_t request_id,
                           const void* body, std::size_t body_len)
 {
     MrMsgHeader header;
@@ -116,7 +114,7 @@ void ControlServer::reply(int client_fd, std::uint16_t type, std::uint32_t reque
     write_all(client_fd, frame.data(), frame.size());
 }
 
-void ControlServer::handle_hello(int client_fd, std::uint32_t request_id, const std::uint8_t* body,
+void ControlServer::handle_hello(socket_t client_fd, std::uint32_t request_id, const std::uint8_t* body,
                                  std::size_t len)
 {
     if (greeted_ || len < sizeof(MrHelloBody))
@@ -148,7 +146,7 @@ void ControlServer::handle_hello(int client_fd, std::uint32_t request_id, const 
     greeted_ = true;
 }
 
-void ControlServer::handle_get_params(int client_fd, std::uint32_t request_id,
+void ControlServer::handle_get_params(socket_t client_fd, std::uint32_t request_id,
                                       const std::uint8_t* body, std::size_t len)
 {
     MR_ASSERT_CONTROL_THREAD();
@@ -219,7 +217,7 @@ void ControlServer::handle_get_params(int client_fd, std::uint32_t request_id,
     reply(client_fd, MR_MSG_PARAM_LIST, request_id, out.data(), out.size());
 }
 
-bool ControlServer::dispatch(int client_fd, const std::vector<std::uint8_t>& payload)
+bool ControlServer::dispatch(socket_t client_fd, const std::vector<std::uint8_t>& payload)
 {
     MR_ASSERT_CONTROL_THREAD();
     MrMsgHeader header;
@@ -457,35 +455,42 @@ bool ControlServer::serve()
         return false;
     }
 
-    int sock = ::socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock < 0)
+    WinsockScope winsock;
+    if (!winsock.ok)
+    {
+        std::fprintf(stderr, "[clap-ipc] WSAStartup failed\n");
+        return false;
+    }
+
+    socket_t sock = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (!socket_valid(sock))
     {
         std::perror("[clap-ipc] socket");
         return false;
     }
 
-    ::unlink(config_.control_socket_path);
+    ::remove(config_.control_socket_path);
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", config_.control_socket_path);
     if (::bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0)
     {
         std::perror("[clap-ipc] bind");
-        ::close(sock);
+        socket_close(sock);
         return false;
     }
     if (::listen(sock, 1) != 0)
     {
         std::perror("[clap-ipc] listen");
-        ::close(sock);
+        socket_close(sock);
         return false;
     }
 
-    int client = ::accept(sock, nullptr, nullptr);
-    if (client < 0)
+    socket_t client = ::accept(sock, nullptr, nullptr);
+    if (!socket_valid(client))
     {
         std::perror("[clap-ipc] accept");
-        ::close(sock);
+        socket_close(sock);
         return false;
     }
 
@@ -512,9 +517,9 @@ bool ControlServer::serve()
         }
     }
 
-    ::close(client);
-    ::close(sock);
-    ::unlink(config_.control_socket_path);
+    socket_close(client);
+    socket_close(sock);
+    ::remove(config_.control_socket_path);
     return true;
 }
 

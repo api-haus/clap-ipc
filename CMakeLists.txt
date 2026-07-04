@@ -56,3 +56,7 @@ endif()
 if(UNIX AND NOT APPLE)
   target_link_libraries(clap_ipc PRIVATE dl rt pthread)
 endif()
+
+if(WIN32)
+  target_link_libraries(clap_ipc PRIVATE ws2_32 avrt)
+endif()
